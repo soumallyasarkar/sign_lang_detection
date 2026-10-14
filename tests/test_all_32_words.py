@@ -1,4 +1,4 @@
-"""Interactive 32-Sign ASL Vocabulary Verification Suite & Desktop GUI (tests/test_all_28_words.py).
+"""Interactive 32-Sign ASL Vocabulary Verification Suite & Desktop GUI (tests/test_all_32_words.py).
 
 Guided live interactive calibration test for all 32 ASL signs (6 words + 26 alphabet letters):
 - Prompts the user to perform each of the 32 signs in sequence.
@@ -13,9 +13,9 @@ Guided live interactive calibration test for all 32 ASL signs (6 words + 26 alph
 - Automatically exports a full markdown and JSON verification scorecard upon completion or exit.
 
 Usage:
-    python tests/test_all_28_words.py               # Launch interactive live desktop GUI
-    python tests/test_all_28_words.py --camera 0    # Specify camera index
-    pytest tests/test_all_28_words.py               # Automated CI test mode
+    python tests/test_all_32_words.py               # Launch interactive live desktop GUI
+    python tests/test_all_32_words.py --camera 0    # Specify camera index
+    pytest tests/test_all_32_words.py               # Automated CI test mode
 """
 
 import os
@@ -180,7 +180,7 @@ class InteractiveVocabTester:
             next_target = self.get_current_target()
             self._announce(f"Next sign: {next_target}.")
         else:
-            self._announce("Congratulations! All 28 vocabulary signs completed.")
+            self._announce(f"Congratulations! All {len(self.vocab)} vocabulary signs completed.")
 
     def previous_word(self):
         """Navigates back to the previous word."""
@@ -218,6 +218,7 @@ class InteractiveVocabTester:
                     print(f"Voice Audio: {state}")
                 elif action == "exit":
                     self.running = False
+                    return True
                 return True
         return False
 
@@ -279,7 +280,8 @@ class InteractiveVocabTester:
         cv2.line(hud, (740, 0), (740, canvas_h), (40, 48, 62), 2)
 
         target = self.get_current_target()
-        all_finished = (self.current_word_idx >= len(self.vocab))
+        total_vocab = len(self.vocab)
+        all_finished = (self.current_word_idx >= total_vocab)
 
         # ======================================================================
         # LEFT PANE: Video Canvas & Telemetry (Width: 740px)
@@ -287,13 +289,13 @@ class InteractiveVocabTester:
 
         # 1. Top Title Bar (Height: 46px)
         cv2.rectangle(hud, (0, 0), (740, 46), (24, 28, 38), -1)
-        cv2.putText(hud, "ASL 28-WORD INTERACTIVE VERIFICATION SUITE", (20, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 229, 255), 2)
+        cv2.putText(hud, f"ASL {total_vocab}-SIGN INTERACTIVE VERIFICATION SUITE", (20, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.62, (0, 229, 255), 2)
 
         if not all_finished:
-            pct_total = (self.current_word_idx / len(self.vocab)) * 100.0
-            cv2.putText(hud, f"Sign {self.current_word_idx + 1}/28 ({pct_total:.0f}%)", (570, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.58, (180, 215, 255), 2)
+            pct_total = (self.current_word_idx / total_vocab) * 100.0
+            cv2.putText(hud, f"Sign {self.current_word_idx + 1}/{total_vocab} ({pct_total:.0f}%)", (560, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.56, (180, 215, 255), 2)
 
         # 2. Prominent Target Sign Card (Height: 88px)
         if not all_finished:
@@ -321,8 +323,8 @@ class InteractiveVocabTester:
         else:
             cv2.rectangle(hud, (15, 54), (725, 142), (18, 55, 28), -1)
             cv2.rectangle(hud, (15, 54), (725, 142), (0, 230, 118), 2)
-            cv2.putText(hud, "★ ALL 28 ASL SIGNS SUCCESSFULLY VERIFIED! ★", (40, 106),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.82, (0, 255, 128), 2)
+            cv2.putText(hud, f"★ ALL {total_vocab} ASL SIGNS SUCCESSFULLY VERIFIED! ★", (40, 106),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.78, (0, 255, 128), 2)
 
         # 3. Centered Video Canvas (480x360 scaled to fit 690x400)
         vid_h, vid_w = annotated_frame.shape[:2]
@@ -332,7 +334,7 @@ class InteractiveVocabTester:
         scaled_frame = cv2.resize(annotated_frame, (scaled_w, scaled_h), interpolation=cv2.INTER_LINEAR)
 
         vx = 15 + (710 - scaled_w) // 2
-        vy = 150 + ( target_vh - scaled_h) // 2
+        vy = 150 + (target_vh - scaled_h) // 2
         hud[vy:vy + scaled_h, vx:vx + scaled_w] = scaled_frame
         cv2.rectangle(hud, (vx, vy), (vx + scaled_w, vy + scaled_h), (45, 55, 75), 1)
 
@@ -388,7 +390,6 @@ class InteractiveVocabTester:
         # 5. Interactive Clickable Buttons
         for btn in self.buttons:
             x1, y1, x2, y2 = btn["rect"]
-            # Dynamic mute label
             label = btn["label"]
             if btn["action"] == "mute":
                 label = "Mute Voice" if self.audio_enabled else "Unmute Voice"
@@ -402,28 +403,28 @@ class InteractiveVocabTester:
             cv2.putText(hud, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (255, 255, 255), 1)
 
         # ======================================================================
-        # RIGHT SIDEBAR: Complete 28-Sign Checklist (Width: 440px)
+        # RIGHT SIDEBAR: Complete 32-Sign Checklist (Width: 440px)
         # ======================================================================
 
         # Sidebar Title
         cv2.rectangle(hud, (740, 0), (canvas_w, 46), (28, 32, 44), -1)
-        cv2.putText(hud, "VOCABULARY CHECKLIST (28 SIGNS)", (755, 30),
+        cv2.putText(hud, f"VOCABULARY CHECKLIST ({total_vocab} SIGNS)", (755, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.58, (0, 215, 255), 2)
 
         total_done = sum(1 for v in self.results.values() if v["completed"])
-        summary_str = f"Verified: {total_done} / 28  ({(total_done / 28) * 100:.1f}%)"
-        cv2.putText(hud, summary_str, (755, 68),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.50, (180, 220, 255), 1)
+        summary_str = f"Verified: {total_done} / {total_vocab}  ({(total_done / max(1, total_vocab)) * 100:.1f}%)"
+        cv2.putText(hud, summary_str, (755, 66),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.48, (180, 220, 255), 1)
 
         # Overall Session Progress Bar
-        bar2_x, bar2_y, bar2_w, bar2_h = 755, 80, 400, 8
+        bar2_x, bar2_y, bar2_w, bar2_h = 755, 76, 400, 8
         cv2.rectangle(hud, (bar2_x, bar2_y), (bar2_x + bar2_w, bar2_y + bar2_h), (35, 42, 55), -1)
-        fill2_w = int(bar2_w * (total_done / 28.0))
+        fill2_w = int(bar2_w * (total_done / max(1.0, float(total_vocab))))
         cv2.rectangle(hud, (bar2_x, bar2_y), (bar2_x + fill2_w, bar2_y + bar2_h), (0, 230, 118), -1)
 
-        # Render all 28 signs in a clean table (each item is 21px high)
-        list_start_y = 108
-        row_h = 21
+        # Render all 32 signs in a clean table (each item is 19px high)
+        list_start_y = 100
+        row_h = 19
 
         for idx, token in enumerate(self.vocab):
             ry = list_start_y + (idx * row_h)
@@ -435,8 +436,8 @@ class InteractiveVocabTester:
 
             # Row background highlight for active word
             if is_active:
-                cv2.rectangle(hud, (748, ry - 14), (canvas_w - 10, ry + 5), (45, 60, 85), -1)
-                cv2.rectangle(hud, (748, ry - 14), (canvas_w - 10, ry + 5), (0, 200, 255), 1)
+                cv2.rectangle(hud, (748, ry - 13), (canvas_w - 10, ry + 4), (45, 60, 85), -1)
+                cv2.rectangle(hud, (748, ry - 13), (canvas_w - 10, ry + 4), (0, 200, 255), 1)
 
             # Prefix & colors
             if is_completed:
@@ -451,7 +452,7 @@ class InteractiveVocabTester:
 
             text_row = f"{prefix} {idx+1:02d}. {token:<12s} ({trials_comp}/3)  {mean_conf}"
             cv2.putText(hud, text_row, (755, ry),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.40, color, 1)
 
         return hud
 
@@ -460,11 +461,12 @@ class InteractiveVocabTester:
         os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
         total_completed = sum(1 for v in self.results.values() if v["completed"])
         total_time = round(time.time() - self.session_start_time, 1)
+        total_vocab = len(self.vocab)
 
         lines = [
-            "# ASL 28-Word Vocabulary Verification Report\n\n",
+            f"# ASL {total_vocab}-Sign Vocabulary Verification Report\n\n",
             f"- **Date & Time:** {time.strftime('%Y-%m-%d %H:%M:%S')}\n",
-            f"- **Words Verified (3/3 Trials):** {total_completed} / {len(self.vocab)} ({total_completed / len(self.vocab) * 100:.1f}%)\n",
+            f"- **Words Verified (3/3 Trials):** {total_completed} / {total_vocab} ({total_completed / max(1, total_vocab) * 100:.1f}%)\n",
             f"- **Total Session Duration:** {total_time} seconds\n\n",
             "## Detailed Results Table:\n\n",
             "| Index | Sign Token | Trials Completed | Status | Mean Confidence | Duration (s) |\n",
@@ -488,7 +490,7 @@ class InteractiveVocabTester:
             json.dump({
                 "date": time.strftime('%Y-%m-%d %H:%M:%S'),
                 "total_completed": total_completed,
-                "total_words": len(self.vocab),
+                "total_words": total_vocab,
                 "duration_seconds": total_time,
                 "results": self.results
             }, f, indent=2)
@@ -497,7 +499,8 @@ class InteractiveVocabTester:
 
     def run_interactive_session(self):
         """Runs the main interactive loop displaying OpenCV HighGUI window."""
-        window_name = "ASL 28-Word Verification Suite"
+        total_vocab = len(self.vocab)
+        window_name = f"ASL {total_vocab}-Sign Verification Suite"
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(window_name, 1180, 720)
 
@@ -509,10 +512,10 @@ class InteractiveVocabTester:
         cv2.setMouseCallback(window_name, on_mouse)
 
         print("\n" + "=" * 75)
-        print("  ASL 28-Word Interactive Verification Suite & Desktop GUI")
+        print(f"  ASL {total_vocab}-Sign Interactive Verification Suite & Desktop GUI")
         print("=" * 75)
-        print(f"Total Signs: {len(self.vocab)}")
-        print(f"Goal: Perform each sign 3 times. The system counts and advances automatically.")
+        print(f"Total Signs: {total_vocab}")
+        print("Goal: Perform each sign 3 times. The system counts and advances automatically.")
         print("Interactive Controls:")
         print("  Mouse : Click on-screen buttons [< Prev], [Reset], [Next >], [Mute], [Save & Exit]")
         print("  [N]   : Skip current word and advance to next")
@@ -560,13 +563,13 @@ class InteractiveVocabTester:
 # ==============================================================================
 
 def test_vocab_tester_initialization():
-    """Validates tester loads all 28 classes and initializes state machine cleanly."""
+    """Validates tester loads all 32 classes (6 words + 26 letters) and initializes state machine cleanly."""
     tester = InteractiveVocabTester(trials_per_word=3)
-    assert len(tester.vocab) == 28, f"Expected 28 classes, got {len(tester.vocab)}"
+    assert len(tester.vocab) == 32, f"Expected 32 classes, got {len(tester.vocab)}"
     assert tester.current_word_idx == 0
     assert tester.current_trial == 0
     assert tester.get_current_target() == tester.vocab[0]
-    assert len(SIGN_DESCRIPTIONS) == 28
+    assert len(SIGN_DESCRIPTIONS) == 32
     for word in tester.vocab:
         assert word in SIGN_DESCRIPTIONS, f"Missing signing hint for {word}"
 
@@ -614,11 +617,11 @@ def test_vocab_tester_report_generation(tmp_path):
     assert os.path.exists(json_file)
     with open(json_file, "r", encoding="utf-8") as f:
         data = json.load(f)
-        assert data["total_words"] == 28
+        assert data["total_words"] == len(tester.vocab)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="ASL 28-Word Interactive Verification Suite & Desktop GUI")
+    parser = argparse.ArgumentParser(description="ASL 32-Sign Interactive Verification Suite & Desktop GUI")
     parser.add_argument("--camera", type=int, default=None, help="Camera index override (default: 0)")
     parser.add_argument("--trials", type=int, default=3, help="Successful detections required per sign (default: 3)")
     parser.add_argument("--thresh", type=float, default=0.70, help="Confidence threshold (default: 0.70)")
