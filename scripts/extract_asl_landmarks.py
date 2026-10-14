@@ -129,15 +129,25 @@ def extract_hand_sequence(image_path: str, mp_hands_instance) -> np.ndarray | No
 
 
 def process_letter(letter: str, dataset_dir: str, output_dir: str, mp_hands, max_images: int = 150) -> int:
-    """Processes images for one letter and saves .npy landmark sequences."""
+    """Processes images for one letter and saves .npy landmark sequences with resume capability."""
     letter_upper = letter.upper()
     letter_dir = os.path.join(dataset_dir, letter_upper)
     if not os.path.isdir(letter_dir):
-        # Try lowercase
         letter_dir = os.path.join(dataset_dir, letter.lower())
     if not os.path.isdir(letter_dir):
         print(f"  [{letter_upper}] ⚠️  Directory not found: {letter_dir}")
         return 0
+
+    out_folder = os.path.join(output_dir, letter_upper)
+    os.makedirs(out_folder, exist_ok=True)
+
+    existing_files = glob.glob(os.path.join(out_folder, "*.npy"))
+    existing_count = len(existing_files)
+
+    # Check if already completed
+    if max_images > 0 and existing_count >= max_images:
+        print(f"  [{letter_upper}] Already has {existing_count:4d} landmark sequences (>= target {max_images}) -> Complete.")
+        return existing_count
 
     image_files = []
     for ext in ("*.jpg", "*.jpeg", "*.png"):
@@ -145,25 +155,36 @@ def process_letter(letter: str, dataset_dir: str, output_dir: str, mp_hands, max
 
     if not image_files:
         print(f"  [{letter_upper}] ⚠️  No image files found in {letter_dir}")
-        return 0
+        return existing_count
 
-    if max_images > 0:
-        image_files = image_files[:max_images]
+    target_count = max_images if max_images > 0 else len(image_files)
+    saved_count = existing_count
 
-    out_folder = os.path.join(output_dir, letter_upper)
-    os.makedirs(out_folder, exist_ok=True)
+    # Check disk space before writing
+    import shutil
+    try:
+        drive_path = os.path.splitdrive(os.path.abspath(output_dir))[0] or output_dir
+        _, _, free_bytes = shutil.disk_usage(drive_path)
+        if free_bytes < 500 * 1024 * 1024:  # Less than 500 MB
+            print(f"  [{letter_upper}] ⚠️ Disk space low ({free_bytes / (1024**2):.1f} MB free). Pausing extraction.")
+            return saved_count
+    except Exception:
+        pass
 
-    saved_count = 0
-    for idx, img_path in enumerate(image_files):
+    # Process remaining images up to target_count
+    for idx, img_path in enumerate(image_files[existing_count:]):
+        if saved_count >= target_count:
+            break
         seq = extract_hand_sequence(img_path, mp_hands)
         if seq is not None:
             out_file = os.path.join(out_folder, f"{saved_count:05d}.npy")
             np.save(out_file, seq)
             saved_count += 1
 
-    pct = (saved_count / len(image_files) * 100) if image_files else 0
-    print(f"  [{letter_upper}] Found {len(image_files):4d} images -> Extracted {saved_count:4d} sequences ({pct:.1f}% success)")
+    pct = (saved_count / target_count * 100) if target_count else 0
+    print(f"  [{letter_upper}] Target: {target_count:4d} | Extracted: {saved_count:4d} ({pct:.1f}% ready)")
     return saved_count
+
 
 
 def main():

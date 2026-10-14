@@ -261,11 +261,18 @@ def main():
         # Try to load real Kaggle/MediaPipe landmarks for this letter
         letter_dir = os.path.join(alpha_landmark_dir, letter.upper())
         real_files = glob.glob(os.path.join(letter_dir, "*.npy")) if os.path.isdir(letter_dir) else []
+        
+        # Subsample up to 350 diverse files per letter to keep RAM efficient and prevent OOM
+        if len(real_files) > 350:
+            step = len(real_files) / 350
+            real_files = [real_files[int(i * step)] for i in range(350)]
+
         real_bases = []
         for fp in real_files:
             arr = np.load(fp)
             if arr.shape == (30, 1629):
                 real_bases.append(arr)
+
 
         if real_bases:
             class_samples[cid] = real_bases
