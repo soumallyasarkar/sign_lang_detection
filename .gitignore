@@ -21,6 +21,10 @@ data/wlasl/landmarks/
 *.mov
 *.webm
 *.npy
+data/asl_alphabet_test/
+data/asl_alphabet_train/
+data/asl_alphabet/
+
 
 # Session logs & test artifacts
 tests/vocab_test_results.json
