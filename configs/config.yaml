@@ -1,0 +1,41 @@
+# Real-Time Sign Language Interpretation System Configuration
+# Aligned with CSE411 Computer Vision Final Project (Team 14)
+
+system:
+  target_fps: 30
+  camera_idx: 0
+  input_resolution: [224, 224]
+  device: "auto"            # "auto" uses NVIDIA RTX GPU if CUDA is available, else CPU
+
+extractor:
+  feature_dim: 1629
+  pose_landmarks: 33        # 33 * 3 = 99D
+  face_landmarks: 468       # 468 * 3 = 1404D
+  hand_landmarks: 21        # 21 * 2 hands * 3 = 126D
+  normalize_anchors: true
+
+model:
+  temporal_window: 30       # T = 30 frames (1.0 second duration)
+  feature_dim: 1629
+  cnn_filters: 256
+  cnn_kernel_size: 3
+  lstm_hidden_dim: 128      # 128 per direction (256 bidirectional)
+  lstm_layers: 2
+  dropout: 0.3
+  num_classes: 28
+  temperature_calib: 1.0
+  weights_path: "models/cnn_bilstm_wlasl.pt"
+
+glosser:
+  threshold: 0.70           # tau = 0.70 confidence for live responsiveness
+  min_consecutive: 3        # k = 3 consecutive frames (~100ms)
+  refractory_period: 8      # R = 8 frames cooldown
+
+translator:
+  weights_path: "models/seq2seq_grammar.pt"
+  grammar_mode: "topic_comment_seq2seq"
+
+tts:
+  voice: "en-US-AriaNeural"
+  max_latency_ms: 100
+  enabled: true

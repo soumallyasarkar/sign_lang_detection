@@ -1,0 +1,37 @@
+# Python virtual environments & bytecode
+.venv/
+env/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyTest cache
+.pytest_cache/
+
+# Audio temporary files
+*.mp3
+*.wav
+
+# Dataset raw videos & extracted landmark arrays (5.3 GB)
+data/wlasl/videos/
+data/wlasl/landmarks/
+*.mp4
+*.avi
+*.mov
+*.webm
+*.npy
+
+# Session logs & test artifacts
+tests/vocab_test_results.json
+tests/vocab_test_results.md
+transcript_log.md
+transcript_session_log.md
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# IDE specific files
+.vscode/
+.idea/

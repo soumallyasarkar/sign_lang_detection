@@ -1,0 +1,170 @@
+[
+  {
+    "gloss": "hello",
+    "class_id": 0,
+    "video_dir": "data/wlasl/videos/HELLO",
+    "landmark_dir": "data/wlasl/landmarks/HELLO"
+  },
+  {
+    "gloss": "thank-you",
+    "class_id": 1,
+    "video_dir": "data/wlasl/videos/THANK-YOU",
+    "landmark_dir": "data/wlasl/landmarks/THANK-YOU"
+  },
+  {
+    "gloss": "help",
+    "class_id": 2,
+    "video_dir": "data/wlasl/videos/HELP",
+    "landmark_dir": "data/wlasl/landmarks/HELP"
+  },
+  {
+    "gloss": "teacher",
+    "class_id": 3,
+    "video_dir": "data/wlasl/videos/TEACHER",
+    "landmark_dir": "data/wlasl/landmarks/TEACHER"
+  },
+  {
+    "gloss": "me",
+    "class_id": 4,
+    "video_dir": "data/wlasl/videos/ME",
+    "landmark_dir": "data/wlasl/landmarks/ME"
+  },
+  {
+    "gloss": "student",
+    "class_id": 5,
+    "video_dir": "data/wlasl/videos/STUDENT",
+    "landmark_dir": "data/wlasl/landmarks/STUDENT"
+  },
+  {
+    "gloss": "computer",
+    "class_id": 6,
+    "video_dir": "data/wlasl/videos/COMPUTER",
+    "landmark_dir": "data/wlasl/landmarks/COMPUTER"
+  },
+  {
+    "gloss": "need",
+    "class_id": 7,
+    "video_dir": "data/wlasl/videos/NEED",
+    "landmark_dir": "data/wlasl/landmarks/NEED"
+  },
+  {
+    "gloss": "water",
+    "class_id": 8,
+    "video_dir": "data/wlasl/videos/WATER",
+    "landmark_dir": "data/wlasl/landmarks/WATER"
+  },
+  {
+    "gloss": "please",
+    "class_id": 9,
+    "video_dir": "data/wlasl/videos/PLEASE",
+    "landmark_dir": "data/wlasl/landmarks/PLEASE"
+  },
+  {
+    "gloss": "nice",
+    "class_id": 10,
+    "video_dir": "data/wlasl/videos/NICE",
+    "landmark_dir": "data/wlasl/landmarks/NICE"
+  },
+  {
+    "gloss": "meet",
+    "class_id": 11,
+    "video_dir": "data/wlasl/videos/MEET",
+    "landmark_dir": "data/wlasl/landmarks/MEET"
+  },
+  {
+    "gloss": "all",
+    "class_id": 12,
+    "video_dir": "data/wlasl/videos/ALL",
+    "landmark_dir": "data/wlasl/landmarks/ALL"
+  },
+  {
+    "gloss": "you",
+    "class_id": 13,
+    "video_dir": "data/wlasl/videos/YOU",
+    "landmark_dir": "data/wlasl/landmarks/YOU"
+  },
+  {
+    "gloss": "candy",
+    "class_id": 14,
+    "video_dir": "data/wlasl/videos/CANDY",
+    "landmark_dir": "data/wlasl/landmarks/CANDY"
+  },
+  {
+    "gloss": "yes",
+    "class_id": 15,
+    "video_dir": "data/wlasl/videos/YES",
+    "landmark_dir": "data/wlasl/landmarks/YES"
+  },
+  {
+    "gloss": "no",
+    "class_id": 16,
+    "video_dir": "data/wlasl/videos/NO",
+    "landmark_dir": "data/wlasl/landmarks/NO"
+  },
+  {
+    "gloss": "more",
+    "class_id": 17,
+    "video_dir": "data/wlasl/videos/MORE",
+    "landmark_dir": "data/wlasl/landmarks/MORE"
+  },
+  {
+    "gloss": "want",
+    "class_id": 18,
+    "video_dir": "data/wlasl/videos/WANT",
+    "landmark_dir": "data/wlasl/landmarks/WANT"
+  },
+  {
+    "gloss": "eat",
+    "class_id": 19,
+    "video_dir": "data/wlasl/videos/EAT",
+    "landmark_dir": "data/wlasl/landmarks/EAT"
+  },
+  {
+    "gloss": "drink",
+    "class_id": 20,
+    "video_dir": "data/wlasl/videos/DRINK",
+    "landmark_dir": "data/wlasl/landmarks/DRINK"
+  },
+  {
+    "gloss": "bathroom",
+    "class_id": 21,
+    "video_dir": "data/wlasl/videos/BATHROOM",
+    "landmark_dir": "data/wlasl/landmarks/BATHROOM"
+  },
+  {
+    "gloss": "sorry",
+    "class_id": 22,
+    "video_dir": "data/wlasl/videos/SORRY",
+    "landmark_dir": "data/wlasl/landmarks/SORRY"
+  },
+  {
+    "gloss": "good",
+    "class_id": 23,
+    "video_dir": "data/wlasl/videos/GOOD",
+    "landmark_dir": "data/wlasl/landmarks/GOOD"
+  },
+  {
+    "gloss": "bad",
+    "class_id": 24,
+    "video_dir": "data/wlasl/videos/BAD",
+    "landmark_dir": "data/wlasl/landmarks/BAD"
+  },
+  {
+    "gloss": "work",
+    "class_id": 25,
+    "video_dir": "data/wlasl/videos/WORK",
+    "landmark_dir": "data/wlasl/landmarks/WORK"
+  },
+  {
+    "gloss": "name",
+    "class_id": 26,
+    "video_dir": "data/wlasl/videos/NAME",
+    "landmark_dir": "data/wlasl/landmarks/NAME"
+  },
+  {
+    "gloss": "friend",
+    "class_id": 27,
+    "video_dir": "data/wlasl/videos/FRIEND",
+    "landmark_dir": "data/wlasl/landmarks/FRIEND"
+  }
+]

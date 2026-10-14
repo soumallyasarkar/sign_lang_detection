@@ -1,0 +1,638 @@
+"""Interactive 28-Word ASL Vocabulary Verification Suite & Desktop GUI (tests/test_all_28_words.py).
+
+Guided live interactive calibration test for all 28 ASL vocabulary gestures:
+- Prompts the user to perform each of the 28 signs in sequence.
+- Tracks 3 successful detections per sign before automatically advancing to the next sign.
+- Features a dual-pane Desktop GUI HUD:
+    * Left Pane: Live video feed with skeletal overlay, prominent target sign banner,
+      signing technique hints, trial progress badges [✓] [✓] [ ], live confidence meter,
+      and clickable navigation buttons ([Prev], [Reset], [Next], [Mute], [Exit]).
+    * Right Pane: Real-time 28-word interactive checklist showing completion status
+      ([✓] PASS, [▶] ACTIVE, [ ] PENDING) and overall session progress bar.
+- Provides spoken audio cues via Neural Edge-TTS ("Trial 1 of 3", "HELLO Completed! Next sign: THANK-YOU").
+- Automatically exports a full markdown and JSON verification scorecard upon completion or exit.
+
+Usage:
+    python tests/test_all_28_words.py               # Launch interactive live desktop GUI
+    python tests/test_all_28_words.py --camera 0    # Specify camera index
+    pytest tests/test_all_28_words.py               # Automated CI test mode
+"""
+
+import os
+import sys
+import time
+import json
+import argparse
+import numpy as np
+import cv2
+
+# Ensure project root is in sys.path
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
+from src.pipeline import ContinuousInterpretationPipeline
+
+
+# Comprehensive signing instructions for all 28 ASL vocabulary gestures
+SIGN_DESCRIPTIONS = {
+    "HELLO": "Open flat hand at temple/forehead, saluting/waving outward.",
+    "THANK-YOU": "Flat hand touches chin/lips, moving forward/downward toward camera.",
+    "HELP": "Closed fist (thumb up) on flat non-dominant palm, lifting together.",
+    "TEACHER": "Both hands at temples push outward, then drop down flat.",
+    "ME": "Index finger pointing directly to your center chest.",
+    "STUDENT": "Dominant hand scoops from open palm to forehead, then hands drop.",
+    "COMPUTER": "Curved 'C' hand moving forward along non-dominant forearm.",
+    "NEED": "Bent index finger ('X' hand) nodding downward repeatedly.",
+    "WATER": "'W' handshape (3 fingers up) tapping chin with index finger.",
+    "PLEASE": "Flat open hand rubbing in a circular motion on chest.",
+    "NICE": "Dominant flat hand sliding forward across non-dominant palm.",
+    "MEET": "Both index fingers pointing up, bringing knuckles together.",
+    "ALL": "Dominant hand circles around non-dominant hand into palm.",
+    "YOU": "Index finger pointing directly forward toward camera.",
+    "CANDY": "Index finger tip touching and twisting slightly at the cheek.",
+    "YES": "Closed fist nodding up and down like a head nodding.",
+    "NO": "Index and middle fingers snapping firmly down onto thumb.",
+    "MORE": "Both hands in flat-O shape tapping fingertips together.",
+    "WANT": "Both hands clawed palms facing up, pulling inward toward body.",
+    "EAT": "Fingertips of flat-O hand tapping lips/mouth.",
+    "DRINK": "Curved 'C' hand tilting upward to mouth like holding a cup.",
+    "BATHROOM": "'T' handshape (fist with thumb between index/middle) shaking.",
+    "SORRY": "Closed fist rubbing in a circular motion over chest.",
+    "GOOD": "Flat hand touching chin, then dropping into open palm.",
+    "BAD": "Flat hand touching chin and flipping palm downward and away.",
+    "WORK": "Both fists, dominant wrist/heel tapping top of non-dominant wrist.",
+    "NAME": "'H' hands (index & middle fingers extended) tapping crosswise.",
+    "FRIEND": "Hooked index fingers linking together and alternating sides.",
+}
+
+
+class InteractiveVocabTester:
+    """Manages sequential testing, verification, and desktop GUI for all 28 ASL signs."""
+
+    def __init__(self, config=None, trials_per_word=3, min_confidence=0.70):
+        self.config = config or self._default_config()
+        self.trials_per_word = int(trials_per_word)
+        self.min_confidence = float(min_confidence)
+
+        # Pipeline
+        self.pipeline = ContinuousInterpretationPipeline(self.config)
+        self.vocab = self.pipeline.vocab
+
+        # State tracking
+        self.current_word_idx = 0
+        self.current_trial = 0
+        self.running = False
+        self.audio_enabled = True
+
+        # Timing and Debounce
+        self.cooldown_frames = 0
+        self.COOLDOWN_DELAY = 35   # ~1.2 seconds at 30 FPS between trials
+        self.advance_delay_frames = 0
+        self.success_flash_frames = 0
+
+        # Detailed results tracking
+        self.results = {
+            token: {
+                "completed": False,
+                "trials_completed": 0,
+                "confidences": [],
+                "elapsed_sec": 0.0,
+                "attempts": 0
+            }
+            for token in self.vocab
+        }
+        self.word_start_time = time.time()
+        self.session_start_time = time.time()
+
+        # GUI Buttons Definition (x1, y1, x2, y2, label, action)
+        self.buttons = [
+            {"rect": (25, 665, 145, 705), "label": "< Prev", "action": "prev", "bg": (55, 60, 75)},
+            {"rect": (160, 665, 285, 705), "label": "Reset (0/3)", "action": "reset", "bg": (65, 55, 50)},
+            {"rect": (300, 665, 435, 705), "label": "Next >", "action": "next", "bg": (40, 90, 160)},
+            {"rect": (450, 665, 575, 705), "label": "Mute Voice", "action": "mute", "bg": (50, 70, 75)},
+            {"rect": (590, 665, 715, 705), "label": "Save & Exit", "action": "exit", "bg": (140, 45, 45)},
+        ]
+
+    def _default_config(self):
+        """Loads default system configuration."""
+        cfg_path = os.path.join(ROOT_DIR, "configs", "config.yaml")
+        if os.path.exists(cfg_path):
+            import yaml
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f)
+        return {
+            "system": {"target_fps": 30, "camera_idx": 0, "device": "auto"},
+            "glosser": {"threshold": 0.70, "min_consecutive": 3, "refractory_period": 8}
+        }
+
+    def start(self):
+        """Starts video ingestion."""
+        self.running = True
+        self.pipeline.start()
+        self.word_start_time = time.time()
+        self.session_start_time = time.time()
+        target = self.get_current_target()
+        self._announce(f"ASL Verification Suite active. Target sign 1: {target}. Please perform {target} 3 times.")
+
+    def stop(self):
+        """Stops video ingestion."""
+        self.running = False
+        self.pipeline.stop()
+
+    def get_current_target(self):
+        """Returns the current target sign token."""
+        if 0 <= self.current_word_idx < len(self.vocab):
+            return self.vocab[self.current_word_idx]
+        return ""
+
+    def _announce(self, text):
+        """Speaks announcement via Edge-TTS if voice is enabled."""
+        if self.audio_enabled and hasattr(self.pipeline, 'tts'):
+            try:
+                self.pipeline.tts.speak_async(text)
+            except Exception:
+                pass
+
+    def advance_to_next_word(self):
+        """Advances to next word in vocabulary sequence."""
+        target = self.get_current_target()
+        if target:
+            elapsed = time.time() - self.word_start_time
+            self.results[target]["elapsed_sec"] = round(elapsed, 2)
+            self.results[target]["completed"] = (self.current_trial >= self.trials_per_word)
+            self.results[target]["trials_completed"] = self.current_trial
+
+        self.current_word_idx += 1
+        self.current_trial = 0
+        self.cooldown_frames = 0
+        self.advance_delay_frames = 0
+        self.word_start_time = time.time()
+        self.pipeline.glosser.reset()
+
+        if self.current_word_idx < len(self.vocab):
+            next_target = self.get_current_target()
+            self._announce(f"Next sign: {next_target}.")
+        else:
+            self._announce("Congratulations! All 28 vocabulary signs completed.")
+
+    def previous_word(self):
+        """Navigates back to the previous word."""
+        if self.current_word_idx > 0:
+            self.current_word_idx -= 1
+            self.current_trial = 0
+            self.cooldown_frames = 0
+            self.advance_delay_frames = 0
+            self.word_start_time = time.time()
+            self.pipeline.glosser.reset()
+            self._announce(f"Back to {self.get_current_target()}.")
+
+    def reset_current_word(self):
+        """Resets trial count for the current word."""
+        self.current_trial = 0
+        self.cooldown_frames = 0
+        self.pipeline.glosser.reset()
+        self._announce(f"Reset {self.get_current_target()}. Trial 1 of 3.")
+
+    def handle_click(self, x, y):
+        """Processes mouse click on interactive HUD buttons."""
+        for btn in self.buttons:
+            x1, y1, x2, y2 = btn["rect"]
+            if x1 <= x <= x2 and y1 <= y <= y2:
+                action = btn["action"]
+                if action == "next":
+                    self.advance_to_next_word()
+                elif action == "prev":
+                    self.previous_word()
+                elif action == "reset":
+                    self.reset_current_word()
+                elif action == "mute":
+                    self.audio_enabled = not self.audio_enabled
+                    state = "ON" if self.audio_enabled else "MUTED"
+                    print(f"Voice Audio: {state}")
+                elif action == "exit":
+                    self.running = False
+                return True
+        return False
+
+    def step(self):
+        """Processes one video frame and evaluates trial matching logic."""
+        annotated_frame, emitted_sign, conf, sentence = self.pipeline.step()
+
+        target = self.get_current_target()
+        pred_sign = getattr(self.pipeline, "latest_predicted_token", "")
+        conf_pct = conf * 100.0
+
+        # Decrement cooldown
+        if self.cooldown_frames > 0:
+            self.cooldown_frames -= 1
+
+        # Waiting for word transition
+        if self.advance_delay_frames > 0:
+            self.advance_delay_frames -= 1
+            if self.advance_delay_frames == 0:
+                self.advance_to_next_word()
+            return annotated_frame, pred_sign, conf, False
+
+        # Match check: Emitted token OR high-confidence raw prediction matching target
+        is_match = False
+        if target and self.cooldown_frames == 0 and self.advance_delay_frames == 0:
+            if emitted_sign == target and conf >= self.min_confidence:
+                is_match = True
+            elif pred_sign == target and conf >= (self.min_confidence + 0.10):
+                is_match = True
+
+        trial_registered = False
+        if is_match and self.current_trial < self.trials_per_word:
+            self.current_trial += 1
+            trial_registered = True
+            self.success_flash_frames = 15
+            self.cooldown_frames = self.COOLDOWN_DELAY
+            self.pipeline.glosser.reset()
+
+            self.results[target]["confidences"].append(round(conf_pct, 1))
+            self.results[target]["trials_completed"] = self.current_trial
+
+            if self.current_trial < self.trials_per_word:
+                self._announce(f"{target}! Trial {self.current_trial} of {self.trials_per_word}.")
+            else:
+                self.results[target]["completed"] = True
+                self._announce(f"Excellent! {target} completed.")
+                self.advance_delay_frames = 40  # ~1.3 seconds celebration before next sign
+
+        return annotated_frame, pred_sign, conf, trial_registered
+
+    def render_hud(self, annotated_frame, pred_sign, conf):
+        """Constructs an informative, beautiful visual HUD over the video feed."""
+        canvas_w, canvas_h = 1180, 720
+        hud = np.zeros((canvas_h, canvas_w, 3), dtype=np.uint8)
+
+        # Background fills
+        hud[:, :740] = (16, 18, 24)       # Left pane (dark slate)
+        hud[:, 740:] = (22, 26, 34)       # Right sidebar (charcoal navy)
+        cv2.line(hud, (740, 0), (740, canvas_h), (40, 48, 62), 2)
+
+        target = self.get_current_target()
+        all_finished = (self.current_word_idx >= len(self.vocab))
+
+        # ======================================================================
+        # LEFT PANE: Video Canvas & Telemetry (Width: 740px)
+        # ======================================================================
+
+        # 1. Top Title Bar (Height: 46px)
+        cv2.rectangle(hud, (0, 0), (740, 46), (24, 28, 38), -1)
+        cv2.putText(hud, "ASL 28-WORD INTERACTIVE VERIFICATION SUITE", (20, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 229, 255), 2)
+
+        if not all_finished:
+            pct_total = (self.current_word_idx / len(self.vocab)) * 100.0
+            cv2.putText(hud, f"Sign {self.current_word_idx + 1}/28 ({pct_total:.0f}%)", (570, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.58, (180, 215, 255), 2)
+
+        # 2. Prominent Target Sign Card (Height: 88px)
+        if not all_finished:
+            cv2.rectangle(hud, (15, 54), (725, 142), (28, 34, 46), -1)
+            cv2.rectangle(hud, (15, 54), (725, 142), (0, 200, 255), 1)
+
+            # Target Sign Heading
+            cv2.putText(hud, f"CURRENT TARGET:  [ {target} ]", (30, 84),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.78, (255, 255, 255), 2)
+
+            # Trial Checkbox Badges
+            badges = []
+            for t in range(self.trials_per_word):
+                badges.append("[X]" if t < self.current_trial else "[ ]")
+            badges_str = " ".join(badges) + f"  ({self.current_trial}/{self.trials_per_word})"
+
+            badge_color = (0, 230, 118) if self.current_trial == self.trials_per_word else (0, 215, 255)
+            cv2.putText(hud, badges_str, (490, 84),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, badge_color, 2)
+
+            # Technique Hint
+            hint_text = SIGN_DESCRIPTIONS.get(target, "Perform sign facing camera.")
+            cv2.putText(hud, f"How to sign: {hint_text}", (30, 122),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.44, (255, 220, 120), 1)
+        else:
+            cv2.rectangle(hud, (15, 54), (725, 142), (18, 55, 28), -1)
+            cv2.rectangle(hud, (15, 54), (725, 142), (0, 230, 118), 2)
+            cv2.putText(hud, "★ ALL 28 ASL SIGNS SUCCESSFULLY VERIFIED! ★", (40, 106),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.82, (0, 255, 128), 2)
+
+        # 3. Centered Video Canvas (480x360 scaled to fit 690x400)
+        vid_h, vid_w = annotated_frame.shape[:2]
+        target_vw, target_vh = 690, 395
+        scale = min(target_vw / vid_w, target_vh / vid_h)
+        scaled_w, scaled_h = int(vid_w * scale), int(vid_h * scale)
+        scaled_frame = cv2.resize(annotated_frame, (scaled_w, scaled_h), interpolation=cv2.INTER_LINEAR)
+
+        vx = 15 + (710 - scaled_w) // 2
+        vy = 150 + ( target_vh - scaled_h) // 2
+        hud[vy:vy + scaled_h, vx:vx + scaled_w] = scaled_frame
+        cv2.rectangle(hud, (vx, vy), (vx + scaled_w, vy + scaled_h), (45, 55, 75), 1)
+
+        # Success Flash Frame Border
+        if self.success_flash_frames > 0:
+            self.success_flash_frames -= 1
+            cv2.rectangle(hud, (vx, vy), (vx + scaled_w, vy + scaled_h), (0, 230, 118), 6)
+            cv2.putText(hud, f"★ TRIAL {self.current_trial}/3 CONFIRMED! ★", (vx + 160, vy + 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.85, (0, 255, 128), 2)
+
+        # 4. Telemetry Banner (Below Video)
+        conf_pct = conf * 100.0
+        tag = "HIGH" if conf_pct >= 85 else ("MED" if conf_pct >= 60 else "LOW")
+        disp_sign = pred_sign if conf_pct >= 40 else "—"
+        tts_str = "ON" if self.audio_enabled else "MUTED"
+
+        if not all_finished:
+            if self.cooldown_frames > 0:
+                status_text = "● LOWER HAND & PREPARE FOR NEXT TRIAL"
+                status_color = (0, 215, 255)
+            elif disp_sign == target and conf_pct >= 70:
+                status_text = "★ TARGET SIGN DETECTED — HOLDING STEADY..."
+                status_color = (0, 230, 118)
+            elif disp_sign != "—":
+                status_text = f"Observing: {disp_sign} (Target is {target})"
+                status_color = (180, 180, 180)
+            else:
+                status_text = "● Awaiting gesture motion in camera frame..."
+                status_color = (130, 140, 150)
+        else:
+            status_text = "Session complete! Click [Save & Exit] or press [Q] to finish."
+            status_color = (0, 255, 128)
+
+        cv2.putText(hud, status_text, (25, 570),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.54, status_color, 2)
+
+        # Confidence Gauge Bar
+        metrics_line = (f"Live Recognized: {disp_sign} ({conf_pct:.1f}% [{tag}])   |   "
+                        f"Current Target: {target or 'FINISHED'}   |   Voice Audio: {tts_str}")
+        cv2.putText(hud, metrics_line, (25, 600),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.50, (200, 215, 230), 1)
+
+        # Progress bar for current word trials
+        bar_x, bar_y, bar_w, bar_h = 25, 616, 690, 12
+        cv2.rectangle(hud, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (35, 42, 55), -1)
+        fill_w = int(bar_w * (self.current_trial / max(1, self.trials_per_word)))
+        cv2.rectangle(hud, (bar_x, bar_y), (bar_x + fill_w, bar_y + bar_h), (0, 230, 118), -1)
+
+        # Hotkeys Helper
+        cv2.putText(hud, "Hotkeys: [N] Next | [B] Back | [R] Reset | [M] Mute | [Q] Quit", (25, 648),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.44, (120, 140, 160), 1)
+
+        # 5. Interactive Clickable Buttons
+        for btn in self.buttons:
+            x1, y1, x2, y2 = btn["rect"]
+            # Dynamic mute label
+            label = btn["label"]
+            if btn["action"] == "mute":
+                label = "Mute Voice" if self.audio_enabled else "Unmute Voice"
+            bg = btn["bg"]
+            cv2.rectangle(hud, (x1, y1), (x2, y2), bg, -1)
+            cv2.rectangle(hud, (x1, y1), (x2, y2), (90, 105, 125), 1)
+
+            text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.46, 1)[0]
+            tx = x1 + (x2 - x1 - text_size[0]) // 2
+            ty = y1 + (y2 - y1 + text_size[1]) // 2
+            cv2.putText(hud, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (255, 255, 255), 1)
+
+        # ======================================================================
+        # RIGHT SIDEBAR: Complete 28-Sign Checklist (Width: 440px)
+        # ======================================================================
+
+        # Sidebar Title
+        cv2.rectangle(hud, (740, 0), (canvas_w, 46), (28, 32, 44), -1)
+        cv2.putText(hud, "VOCABULARY CHECKLIST (28 SIGNS)", (755, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.58, (0, 215, 255), 2)
+
+        total_done = sum(1 for v in self.results.values() if v["completed"])
+        summary_str = f"Verified: {total_done} / 28  ({(total_done / 28) * 100:.1f}%)"
+        cv2.putText(hud, summary_str, (755, 68),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.50, (180, 220, 255), 1)
+
+        # Overall Session Progress Bar
+        bar2_x, bar2_y, bar2_w, bar2_h = 755, 80, 400, 8
+        cv2.rectangle(hud, (bar2_x, bar2_y), (bar2_x + bar2_w, bar2_y + bar2_h), (35, 42, 55), -1)
+        fill2_w = int(bar2_w * (total_done / 28.0))
+        cv2.rectangle(hud, (bar2_x, bar2_y), (bar2_x + fill2_w, bar2_y + bar2_h), (0, 230, 118), -1)
+
+        # Render all 28 signs in a clean table (each item is 21px high)
+        list_start_y = 108
+        row_h = 21
+
+        for idx, token in enumerate(self.vocab):
+            ry = list_start_y + (idx * row_h)
+            is_active = (idx == self.current_word_idx)
+            is_completed = self.results[token]["completed"]
+            trials_comp = self.results[token]["trials_completed"]
+            confs = self.results[token]["confidences"]
+            mean_conf = f"{np.mean(confs):.0f}%" if confs else "--"
+
+            # Row background highlight for active word
+            if is_active:
+                cv2.rectangle(hud, (748, ry - 14), (canvas_w - 10, ry + 5), (45, 60, 85), -1)
+                cv2.rectangle(hud, (748, ry - 14), (canvas_w - 10, ry + 5), (0, 200, 255), 1)
+
+            # Prefix & colors
+            if is_completed:
+                prefix = "[X]"
+                color = (0, 230, 118)   # Bright green
+            elif is_active:
+                prefix = "[>]"
+                color = (0, 235, 255)   # Cyan / Yellow
+            else:
+                prefix = "[ ]"
+                color = (120, 130, 145) # Dim slate
+
+            text_row = f"{prefix} {idx+1:02d}. {token:<12s} ({trials_comp}/3)  {mean_conf}"
+            cv2.putText(hud, text_row, (755, ry),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1)
+
+        return hud
+
+    def export_report(self, filepath="tests/vocab_test_results.md"):
+        """Exports complete verification results to markdown and JSON."""
+        os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
+        total_completed = sum(1 for v in self.results.values() if v["completed"])
+        total_time = round(time.time() - self.session_start_time, 1)
+
+        lines = [
+            "# ASL 28-Word Vocabulary Verification Report\n\n",
+            f"- **Date & Time:** {time.strftime('%Y-%m-%d %H:%M:%S')}\n",
+            f"- **Words Verified (3/3 Trials):** {total_completed} / {len(self.vocab)} ({total_completed / len(self.vocab) * 100:.1f}%)\n",
+            f"- **Total Session Duration:** {total_time} seconds\n\n",
+            "## Detailed Results Table:\n\n",
+            "| Index | Sign Token | Trials Completed | Status | Mean Confidence | Duration (s) |\n",
+            "|---|---|:---:|:---:|:---:|:---:|\n"
+        ]
+
+        for idx, token in enumerate(self.vocab, 1):
+            data = self.results[token]
+            status = "PASS" if data["completed"] else ("PARTIAL" if data["trials_completed"] > 0 else "SKIPPED")
+            confs = data["confidences"]
+            mean_c = f"{np.mean(confs):.1f}%" if confs else "N/A"
+            dur = f"{data['elapsed_sec']:.1f}s" if data['elapsed_sec'] > 0 else "—"
+            lines.append(f"| {idx} | **{token}** | {data['trials_completed']}/{self.trials_per_word} | {status} | {mean_c} | {dur} |\n")
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+
+        # Also write JSON summary
+        json_path = os.path.splitext(filepath)[0] + ".json"
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "date": time.strftime('%Y-%m-%d %H:%M:%S'),
+                "total_completed": total_completed,
+                "total_words": len(self.vocab),
+                "duration_seconds": total_time,
+                "results": self.results
+            }, f, indent=2)
+
+        return filepath
+
+    def run_interactive_session(self):
+        """Runs the main interactive loop displaying OpenCV HighGUI window."""
+        window_name = "ASL 28-Word Verification Suite"
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(window_name, 1180, 720)
+
+        # Mouse click callback
+        def on_mouse(event, x, y, flags, param):
+            if event == cv2.EVENT_LBUTTONDOWN:
+                self.handle_click(x, y)
+
+        cv2.setMouseCallback(window_name, on_mouse)
+
+        print("\n" + "=" * 75)
+        print("  ASL 28-Word Interactive Verification Suite & Desktop GUI")
+        print("=" * 75)
+        print(f"Total Signs: {len(self.vocab)}")
+        print(f"Goal: Perform each sign 3 times. The system counts and advances automatically.")
+        print("Interactive Controls:")
+        print("  Mouse : Click on-screen buttons [< Prev], [Reset], [Next >], [Mute], [Save & Exit]")
+        print("  [N]   : Skip current word and advance to next")
+        print("  [B]   : Go back to previous word")
+        print("  [R]   : Reset counter for current word")
+        print("  [M]   : Toggle voice audio on / off")
+        print("  [Q]   : Save report and quit")
+        print("=" * 75 + "\n")
+
+        self.start()
+        try:
+            while self.running:
+                annotated_frame, pred_sign, conf, registered = self.step()
+                hud = self.render_hud(annotated_frame, pred_sign, conf)
+
+                cv2.imshow(window_name, hud)
+                key = cv2.waitKey(20) & 0xFF
+
+                if key in [ord('q'), 27]:
+                    print("\nExit requested by user. Finishing session...")
+                    break
+                elif key == ord('n'):
+                    print(f"Skipping {self.get_current_target()} -> advancing to next.")
+                    self.advance_to_next_word()
+                elif key in [ord('b'), ord('p')]:
+                    print("Returning to previous word.")
+                    self.previous_word()
+                elif key == ord('r'):
+                    print(f"Resetting trials for {self.get_current_target()}.")
+                    self.reset_current_word()
+                elif key == ord('m'):
+                    self.audio_enabled = not self.audio_enabled
+                    state = "ON" if self.audio_enabled else "MUTED"
+                    print(f"Voice Audio: {state}")
+        finally:
+            self.stop()
+            cv2.destroyAllWindows()
+            report_file = self.export_report()
+            print(f"\nVerification report generated: {os.path.abspath(report_file)}")
+            print("=" * 75)
+
+
+# ==============================================================================
+# PyTest Automated Unit Tests (Allows pytest tests/ to pass in automated CI)
+# ==============================================================================
+
+def test_vocab_tester_initialization():
+    """Validates tester loads all 28 classes and initializes state machine cleanly."""
+    tester = InteractiveVocabTester(trials_per_word=3)
+    assert len(tester.vocab) == 28, f"Expected 28 classes, got {len(tester.vocab)}"
+    assert tester.current_word_idx == 0
+    assert tester.current_trial == 0
+    assert tester.get_current_target() == tester.vocab[0]
+    assert len(SIGN_DESCRIPTIONS) == 28
+    for word in tester.vocab:
+        assert word in SIGN_DESCRIPTIONS, f"Missing signing hint for {word}"
+
+
+def test_vocab_tester_progression_logic():
+    """Validates progression across 3 trials and advancement to subsequent word."""
+    tester = InteractiveVocabTester(trials_per_word=3)
+    initial_target = tester.get_current_target()
+
+    # Trial 1
+    tester.current_trial = 1
+    assert tester.current_trial == 1
+    assert tester.get_current_target() == initial_target
+
+    # Trial 2
+    tester.current_trial = 2
+    assert tester.current_trial == 2
+
+    # Trial 3: complete all 3 trials and advance
+    tester.current_trial = 3
+    tester.advance_to_next_word()
+    assert tester.current_word_idx == 1
+    assert tester.current_trial == 0
+    assert tester.get_current_target() == tester.vocab[1]
+    assert tester.results[initial_target]["completed"] is True
+
+
+def test_vocab_tester_report_generation(tmp_path):
+    """Validates markdown and JSON verification reporting."""
+    tester = InteractiveVocabTester(trials_per_word=3)
+    out_file = str(tmp_path / "test_report.md")
+    tester.results["HELLO"]["completed"] = True
+    tester.results["HELLO"]["trials_completed"] = 3
+    tester.results["HELLO"]["confidences"] = [95.0, 96.2, 98.1]
+
+    saved = tester.export_report(out_file)
+    assert os.path.exists(saved)
+    with open(saved, "r", encoding="utf-8") as f:
+        content = f.read()
+        assert "HELLO" in content
+        assert "3/3" in content
+        assert "PASS" in content
+
+    json_file = str(tmp_path / "test_report.json")
+    assert os.path.exists(json_file)
+    with open(json_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+        assert data["total_words"] == 28
+
+
+def main():
+    parser = argparse.ArgumentParser(description="ASL 28-Word Interactive Verification Suite & Desktop GUI")
+    parser.add_argument("--camera", type=int, default=None, help="Camera index override (default: 0)")
+    parser.add_argument("--trials", type=int, default=3, help="Successful detections required per sign (default: 3)")
+    parser.add_argument("--thresh", type=float, default=0.70, help="Confidence threshold (default: 0.70)")
+    args = parser.parse_args()
+
+    cfg_path = os.path.join(ROOT_DIR, "configs", "config.yaml")
+    config = {}
+    if os.path.exists(cfg_path):
+        import yaml
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+
+    if args.camera is not None:
+        if 'system' not in config:
+            config['system'] = {}
+        config['system']['camera_idx'] = args.camera
+
+    tester = InteractiveVocabTester(config=config, trials_per_word=args.trials, min_confidence=args.thresh)
+    tester.run_interactive_session()
+
+
+if __name__ == "__main__":
+    main()
