@@ -1,15 +1,15 @@
-"""Interactive 28-Word ASL Vocabulary Verification Suite & Desktop GUI (tests/test_all_28_words.py).
+"""Interactive 32-Sign ASL Vocabulary Verification Suite & Desktop GUI (tests/test_all_28_words.py).
 
-Guided live interactive calibration test for all 28 ASL vocabulary gestures:
-- Prompts the user to perform each of the 28 signs in sequence.
+Guided live interactive calibration test for all 32 ASL signs (6 words + 26 alphabet letters):
+- Prompts the user to perform each of the 32 signs in sequence.
 - Tracks 3 successful detections per sign before automatically advancing to the next sign.
 - Features a dual-pane Desktop GUI HUD:
     * Left Pane: Live video feed with skeletal overlay, prominent target sign banner,
       signing technique hints, trial progress badges [✓] [✓] [ ], live confidence meter,
       and clickable navigation buttons ([Prev], [Reset], [Next], [Mute], [Exit]).
-    * Right Pane: Real-time 28-word interactive checklist showing completion status
+    * Right Pane: Real-time 32-sign interactive checklist showing completion status
       ([✓] PASS, [▶] ACTIVE, [ ] PENDING) and overall session progress bar.
-- Provides spoken audio cues via Neural Edge-TTS ("Trial 1 of 3", "HELLO Completed! Next sign: THANK-YOU").
+- Provides spoken audio cues via Neural Edge-TTS.
 - Automatically exports a full markdown and JSON verification scorecard upon completion or exit.
 
 Usage:
@@ -34,41 +34,47 @@ if ROOT_DIR not in sys.path:
 from src.pipeline import ContinuousInterpretationPipeline
 
 
-# Comprehensive signing instructions for all 28 ASL vocabulary gestures
+# Comprehensive signing instructions for all 32 ASL signs (6 words + 26 alphabet letters)
 SIGN_DESCRIPTIONS = {
-    "HELLO": "Open flat hand at temple/forehead, saluting/waving outward.",
+    # ---- 6 ASL Words ----
+    "HELLO":     "Open flat hand at temple/forehead, saluting/waving outward.",
     "THANK-YOU": "Flat hand touches chin/lips, moving forward/downward toward camera.",
-    "HELP": "Closed fist (thumb up) on flat non-dominant palm, lifting together.",
-    "TEACHER": "Both hands at temples push outward, then drop down flat.",
-    "ME": "Index finger pointing directly to your center chest.",
-    "STUDENT": "Dominant hand scoops from open palm to forehead, then hands drop.",
-    "COMPUTER": "Curved 'C' hand moving forward along non-dominant forearm.",
-    "NEED": "Bent index finger ('X' hand) nodding downward repeatedly.",
-    "WATER": "'W' handshape (3 fingers up) tapping chin with index finger.",
-    "PLEASE": "Flat open hand rubbing in a circular motion on chest.",
-    "NICE": "Dominant flat hand sliding forward across non-dominant palm.",
-    "MEET": "Both index fingers pointing up, bringing knuckles together.",
-    "ALL": "Dominant hand circles around non-dominant hand into palm.",
-    "YOU": "Index finger pointing directly forward toward camera.",
-    "CANDY": "Index finger tip touching and twisting slightly at the cheek.",
-    "YES": "Closed fist nodding up and down like a head nodding.",
-    "NO": "Index and middle fingers snapping firmly down onto thumb.",
-    "MORE": "Both hands in flat-O shape tapping fingertips together.",
-    "WANT": "Both hands clawed palms facing up, pulling inward toward body.",
-    "EAT": "Fingertips of flat-O hand tapping lips/mouth.",
-    "DRINK": "Curved 'C' hand tilting upward to mouth like holding a cup.",
-    "BATHROOM": "'T' handshape (fist with thumb between index/middle) shaking.",
-    "SORRY": "Closed fist rubbing in a circular motion over chest.",
-    "GOOD": "Flat hand touching chin, then dropping into open palm.",
-    "BAD": "Flat hand touching chin and flipping palm downward and away.",
-    "WORK": "Both fists, dominant wrist/heel tapping top of non-dominant wrist.",
-    "NAME": "'H' hands (index & middle fingers extended) tapping crosswise.",
-    "FRIEND": "Hooked index fingers linking together and alternating sides.",
+    "PLEASE":    "Flat open hand rubbing in a circular motion on chest.",
+    "MEET":      "Both index fingers pointing up, bringing knuckles together.",
+    "NO":        "Index and middle fingers snapping firmly down onto thumb.",
+    "YES":       "Closed fist nodding up and down like a head nodding.",
+    # ---- 26 ASL Alphabet Letters ----
+    "A": "Closed fist, thumb resting on side (like an 'A' fist).",
+    "B": "Four fingers flat up, thumb tucked across palm.",
+    "C": "Curve all fingers and thumb into a 'C' arc shape.",
+    "D": "Index finger up, thumb touching middle finger forming 'D'.",
+    "E": "All fingers curled/hooked down, thumb tucked under.",
+    "F": "Thumb and index touch (OK), other three fingers spread up.",
+    "G": "Index and thumb pointing sideways (like a gun pointing right).",
+    "H": "Index and middle fingers extended together pointing sideways.",
+    "I": "Pinky only extended straight up, fist closed.",
+    "J": "Pinky up (like I), then trace a 'J' curve with pinky.",
+    "K": "Index and middle up, thumb out between them (like K).",
+    "L": "Index up and thumb out sideways forming an 'L' shape.",
+    "M": "Three fingers (index, mid, ring) folded over thumb.",
+    "N": "Two fingers (index, mid) folded over thumb.",
+    "O": "All fingertips curve to meet thumb, forming an 'O' circle.",
+    "P": "Like K shape but pointing downward.",
+    "Q": "Like G shape but pointing downward.",
+    "R": "Index and middle fingers crossed (R for 'right').",
+    "S": "Closed fist, thumb wrapped over fingers (all tucked).",
+    "T": "Thumb tucked between index and middle finger.",
+    "U": "Index and middle fingers up together side by side.",
+    "V": "Index and middle fingers spread into V/peace sign.",
+    "W": "Index, middle, and ring fingers spread up (three fingers).",
+    "X": "Index finger bent/hooked like a hook.",
+    "Y": "Thumb and pinky extended (shaka/hang-loose sign).",
+    "Z": "Index finger traces a 'Z' shape in the air.",
 }
 
 
 class InteractiveVocabTester:
-    """Manages sequential testing, verification, and desktop GUI for all 28 ASL signs."""
+    """Manages sequential testing, verification, and desktop GUI for all 32 ASL signs."""
 
     def __init__(self, config=None, trials_per_word=3, min_confidence=0.70):
         self.config = config or self._default_config()

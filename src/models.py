@@ -138,7 +138,10 @@ class SpatioTemporalSequenceModel(nn.Module):
             return pred_id, confidence
 
     def _compute_kinematic_priors(self, frame_vec, vocab_list, window_data=None):
-        """Analyzes spatial landmark geometry to compute gesture class logit priors."""
+        """Analyzes spatial landmark geometry to compute gesture class logit priors.
+        Supports: 6 ASL words (HELLO, THANK-YOU, PLEASE, MEET, NO, YES)
+        and 26 ASL fingerspelling alphabet letters (A-Z).
+        """
         if frame_vec is None or len(frame_vec) < 1629 or vocab_list is None:
             return None
 
@@ -158,7 +161,7 @@ class SpatioTemporalSequenceModel(nn.Module):
 
         token_to_idx = {name: idx for idx, name in enumerate(vocab_list)}
 
-        # Select primary signing hand (supports right-handed, left-handed, or mirrored webcams)
+        # Select primary signing hand
         hand = rh if rh_active else lh
         wrist = hand[0]
         w_y = frame_vec[49] if rh_active else frame_vec[46]
@@ -166,18 +169,37 @@ class SpatioTemporalSequenceModel(nn.Module):
 
         thumb_tip = hand[4]
         index_tip = hand[8]
-        mid_tip = hand[12]
-        ring_tip = hand[16]
+        mid_tip   = hand[12]
+        ring_tip  = hand[16]
         pinky_tip = hand[20]
 
-        # Finger extension check: distance from wrist (point 0) to fingertips
-        index_ext = np.linalg.norm(index_tip - wrist) > 0.12
-        mid_ext = np.linalg.norm(mid_tip - wrist) > 0.12
-        ring_ext = np.linalg.norm(ring_tip - wrist) > 0.12
-        pinky_ext = np.linalg.norm(pinky_tip - wrist) > 0.12
-        open_hand = index_ext and mid_ext and ring_ext and pinky_ext
+        # Thumb intermediate knuckle (MCP) for lateral detection
+        thumb_mcp = hand[2]
 
-        # Window trajectory analysis: find highest reach (min Y) across the rolling sequence
+        # Finger extension: distance from wrist to fingertips
+        EXT_THRESH = 0.12
+        ALPHA_EXT  = 0.09   # tighter threshold for alphabet letters (smaller motion)
+        thumb_ext  = np.linalg.norm(thumb_tip  - wrist) > EXT_THRESH
+        index_ext  = np.linalg.norm(index_tip  - wrist) > EXT_THRESH
+        mid_ext    = np.linalg.norm(mid_tip    - wrist) > EXT_THRESH
+        ring_ext   = np.linalg.norm(ring_tip   - wrist) > EXT_THRESH
+        pinky_ext  = np.linalg.norm(pinky_tip  - wrist) > EXT_THRESH
+        open_hand  = index_ext and mid_ext and ring_ext and pinky_ext
+
+        # Alpha-scale extensions (smaller thresholds for static handshapes)
+        a_thumb = np.linalg.norm(thumb_tip  - wrist) > ALPHA_EXT
+        a_index = np.linalg.norm(index_tip  - wrist) > ALPHA_EXT
+        a_mid   = np.linalg.norm(mid_tip    - wrist) > ALPHA_EXT
+        a_ring  = np.linalg.norm(ring_tip   - wrist) > ALPHA_EXT
+        a_pinky = np.linalg.norm(pinky_tip  - wrist) > ALPHA_EXT
+
+        # Inter-finger spread for distinguishing V from U, etc.
+        idx_mid_spread = np.linalg.norm(index_tip[:2] - mid_tip[:2])  # XY only
+        thumb_idx_dist = np.linalg.norm(thumb_tip - index_tip)
+        thumb_mid_dist = np.linalg.norm(thumb_tip - mid_tip)
+        thumb_side_x   = abs(thumb_mcp[0] - wrist[0])  # lateral thumb position
+
+        # Window trajectory analysis
         min_mid_y = mid_tip[1]
         min_mid_x = mid_tip[0]
         if window_data is not None and len(window_data) >= 10:
@@ -185,60 +207,181 @@ class SpatioTemporalSequenceModel(nn.Module):
             h_arr = w_arr[:, 1566:1629].reshape(-1, 21, 3) if rh_active else w_arr[:, 1503:1566].reshape(-1, 21, 3)
             act_h = np.any(h_arr != 0, axis=(1, 2))
             if np.any(act_h):
-                valid_h = h_arr[act_h]
+                valid_h   = h_arr[act_h]
                 min_mid_y = np.min(valid_h[:, 12, 1])
-                best_idx = np.argmin(valid_h[:, 12, 1])
+                best_idx  = np.argmin(valid_h[:, 12, 1])
                 min_mid_x = valid_h[best_idx, 12, 0]
 
-        # 1. HELLO: Hand raised HIGH to temple / forehead level (above eyes/nose: min_mid_y < 0.0 or w_y < 0.10, lateral abs(min_mid_x) > 0.20)
+        # ------------------------------------------------------------------ #
+        #  WORD PRIORS (6 ASL words)                                          #
+        # ------------------------------------------------------------------ #
+
+        # 1. HELLO: Open hand raised to forehead/temple (high + lateral)
         if open_hand and (min_mid_y < 0.0 or (min_mid_y < 0.10 and abs(min_mid_x) > 0.20)):
             if "HELLO" in token_to_idx:
                 boosts[token_to_idx["HELLO"]] += 6.5
 
-        # 2. THANK-YOU: Hand touches or starts at chin / lips / mouth (0.02 <= min_mid_y <= 0.38, centered abs(min_mid_x) <= 0.18), open flat palm moving outward
+        # 2. THANK-YOU: Open flat hand at chin/lips, moving outward (centered)
         elif open_hand and (0.02 <= min_mid_y <= 0.38) and abs(min_mid_x) <= 0.18:
             if "THANK-YOU" in token_to_idx:
                 boosts[token_to_idx["THANK-YOU"]] += 6.5
 
-        # 3. WATER: 3 fingers up (W-shape: index, middle, ring extended, pinky curled) near chin
-        elif index_ext and mid_ext and ring_ext and not pinky_ext and abs(w_x) < 0.30:
-            if "WATER" in token_to_idx:
-                boosts[token_to_idx["WATER"]] += 6.5
-
-        # 4. PLEASE: Flat hand placed against chest (lower than chin: min_mid_y >= 0.45, centered abs(w_x) < 0.35)
+        # 3. PLEASE: Flat hand on chest (low: min_mid_y >= 0.45, centered)
         elif open_hand and min_mid_y >= 0.45 and abs(w_x) < 0.35:
             if "PLEASE" in token_to_idx:
                 boosts[token_to_idx["PLEASE"]] += 5.8
 
-        # 5. ME: Index finger pointing to chest
-        elif w_y > 0.20 and index_ext and not mid_ext and not ring_ext and not pinky_ext:
-            if "ME" in token_to_idx:
-                boosts[token_to_idx["ME"]] += 6.0
+        # 4. MEET: Two flat hands brought together (both active, upper-mid zone)
+        elif rh_active and lh_active and w_y < 0.55:
+            if "MEET" in token_to_idx:
+                boosts[token_to_idx["MEET"]] += 5.5
 
-        # 6. YES: Closed fist nodding at chest level
-        elif w_y > 0.15 and not index_ext and not mid_ext and not ring_ext and not pinky_ext:
-            if "YES" in token_to_idx:
-                boosts[token_to_idx["YES"]] += 5.5
-
-        # 7. HELP: Both hands active, one supporting the other
-        elif rh_active and lh_active and (w_y > 0.20 or frame_vec[46] > 0.20):
-            if "HELP" in token_to_idx:
-                boosts[token_to_idx["HELP"]] += 5.5
-
-        # 8. NO: Pinching gesture (thumb, index, middle closing together)
-        elif np.linalg.norm(thumb_tip - index_tip) < 0.08 and not ring_ext and not pinky_ext:
+        # 5. NO: Pinching tap (thumb+index+middle touching)
+        elif thumb_idx_dist < 0.08 and thumb_mid_dist < 0.10 and not ring_ext and not pinky_ext:
             if "NO" in token_to_idx:
                 boosts[token_to_idx["NO"]] += 5.5
 
-        # 9. YOU: Index finger extended pointing toward camera
-        elif index_ext and not mid_ext and not ring_ext and not pinky_ext:
-            if "YOU" in token_to_idx:
-                boosts[token_to_idx["YOU"]] += 5.2
+        # 6. YES: Closed fist with nodding motion (all fingers curled)
+        elif w_y > 0.15 and not a_index and not a_mid and not a_ring and not a_pinky:
+            if "YES" in token_to_idx:
+                boosts[token_to_idx["YES"]] += 5.5
 
-        # 10. STUDENT: Two hands active in lower-mid chest plane
-        elif rh_active and lh_active and (w_y > 0.10 or frame_vec[46] > 0.10):
-            if "STUDENT" in token_to_idx:
-                boosts[token_to_idx["STUDENT"]] += 4.5
+        # ------------------------------------------------------------------ #
+        #  ALPHABET PRIORS (A-Z fingerspelling handshape geometry)            #
+        #  Each prior applies a moderate boost (+3.5) rather than overriding  #
+        #  the neural network — these guide disambiguation of similar shapes. #
+        # ------------------------------------------------------------------ #
+        ALPHA_BOOST = 3.5
+
+        # A: Closed fist, thumb resting on side (no fingers extended, thumb lateral)
+        if not a_index and not a_mid and not a_ring and not a_pinky and thumb_side_x > 0.06:
+            if "A" in token_to_idx:
+                boosts[token_to_idx["A"]] += ALPHA_BOOST
+
+        # B: Four fingers extended straight up, thumb tucked (open hand, thumb in)
+        if a_index and a_mid and a_ring and a_pinky and thumb_side_x < 0.05:
+            if "B" in token_to_idx:
+                boosts[token_to_idx["B"]] += ALPHA_BOOST
+
+        # C: All fingers partially curved into C-arc (moderate extension)
+        if all(0.06 < np.linalg.norm(hand[tip] - wrist) < 0.16 for tip in [4, 8, 12, 16, 20]):
+            if "C" in token_to_idx:
+                boosts[token_to_idx["C"]] += ALPHA_BOOST
+
+        # D: Index up, thumb touches middle finger (ring+pinky closed)
+        if a_index and not a_mid and not a_ring and not a_pinky and thumb_mid_dist < 0.10:
+            if "D" in token_to_idx:
+                boosts[token_to_idx["D"]] += ALPHA_BOOST
+
+        # E: All fingers curled/hooked close to palm (all short distances)
+        if all(np.linalg.norm(hand[tip] - wrist) < 0.10 for tip in [4, 8, 12, 16, 20]):
+            if "E" in token_to_idx:
+                boosts[token_to_idx["E"]] += ALPHA_BOOST
+
+        # F: Thumb + index touch (OK sign), middle+ring+pinky extended
+        if thumb_idx_dist < 0.08 and a_mid and a_ring and a_pinky:
+            if "F" in token_to_idx:
+                boosts[token_to_idx["F"]] += ALPHA_BOOST
+
+        # G: Index + thumb pointing sideways (gun shape)
+        if a_index and not a_mid and not a_ring and not a_pinky and thumb_side_x > 0.08:
+            if "G" in token_to_idx:
+                boosts[token_to_idx["G"]] += ALPHA_BOOST
+
+        # H: Index + middle extended horizontally (together, flat)
+        if a_index and a_mid and not a_ring and not a_pinky and idx_mid_spread < 0.05:
+            if "H" in token_to_idx:
+                boosts[token_to_idx["H"]] += ALPHA_BOOST
+
+        # I: Pinky only extended (all others closed)
+        if not a_index and not a_mid and not a_ring and a_pinky:
+            if "I" in token_to_idx:
+                boosts[token_to_idx["I"]] += ALPHA_BOOST
+
+        # J: Like I (pinky only) — model handles trajectory difference
+        if not a_index and not a_mid and not a_ring and a_pinky:
+            if "J" in token_to_idx:
+                boosts[token_to_idx["J"]] += ALPHA_BOOST * 0.8  # slight de-priority vs I
+
+        # K: Index + middle up, thumb sticking out between them
+        if a_index and a_mid and not a_ring and not a_pinky and thumb_side_x > 0.06:
+            if "K" in token_to_idx:
+                boosts[token_to_idx["K"]] += ALPHA_BOOST
+
+        # L: Index + thumb extended laterally (L-shape)
+        if a_index and not a_mid and not a_ring and not a_pinky and thumb_side_x > 0.10:
+            if "L" in token_to_idx:
+                boosts[token_to_idx["L"]] += ALPHA_BOOST
+
+        # M: Three fingers folded over thumb (index+mid+ring close, low extension)
+        if all(np.linalg.norm(hand[tip] - wrist) < 0.12 for tip in [8, 12, 16]) and not a_pinky:
+            if "M" in token_to_idx:
+                boosts[token_to_idx["M"]] += ALPHA_BOOST
+
+        # N: Two fingers (index+mid) folded over thumb
+        if all(np.linalg.norm(hand[tip] - wrist) < 0.12 for tip in [8, 12]) and not a_ring and not a_pinky:
+            if "N" in token_to_idx:
+                boosts[token_to_idx["N"]] += ALPHA_BOOST
+
+        # O: All fingertips meeting thumb tip to form an O shape
+        if all(np.linalg.norm(hand[tip] - thumb_tip) < 0.10 for tip in [8, 12, 16, 20]):
+            if "O" in token_to_idx:
+                boosts[token_to_idx["O"]] += ALPHA_BOOST
+
+        # P: Like K but hand pointing downward (wrist high, fingertips low)
+        if a_index and a_mid and not a_ring and not a_pinky and w_y < 0.40:
+            if "P" in token_to_idx:
+                boosts[token_to_idx["P"]] += ALPHA_BOOST
+
+        # Q: Like G but pointing downward
+        if a_index and not a_mid and not a_ring and not a_pinky and thumb_side_x > 0.08 and w_y < 0.40:
+            if "Q" in token_to_idx:
+                boosts[token_to_idx["Q"]] += ALPHA_BOOST
+
+        # R: Index + middle crossed (together and touching)
+        if a_index and a_mid and not a_ring and not a_pinky and idx_mid_spread < 0.04:
+            if "R" in token_to_idx:
+                boosts[token_to_idx["R"]] += ALPHA_BOOST
+
+        # S: Closed fist, thumb over fingers (very compact)
+        if not a_index and not a_mid and not a_ring and not a_pinky and thumb_idx_dist < 0.10:
+            if "S" in token_to_idx:
+                boosts[token_to_idx["S"]] += ALPHA_BOOST
+
+        # T: Thumb inserted between index and middle
+        if not a_index and not a_mid and not a_ring and not a_pinky and thumb_side_x < 0.05 and thumb_idx_dist < 0.12:
+            if "T" in token_to_idx:
+                boosts[token_to_idx["T"]] += ALPHA_BOOST
+
+        # U: Index + middle extended together (side by side, small spread)
+        if a_index and a_mid and not a_ring and not a_pinky and idx_mid_spread < 0.06:
+            if "U" in token_to_idx:
+                boosts[token_to_idx["U"]] += ALPHA_BOOST
+
+        # V: Index + middle spread apart (peace/victory sign)
+        if a_index and a_mid and not a_ring and not a_pinky and idx_mid_spread > 0.07:
+            if "V" in token_to_idx:
+                boosts[token_to_idx["V"]] += ALPHA_BOOST
+
+        # W: Index + middle + ring extended, pinky closed
+        if a_index and a_mid and a_ring and not a_pinky:
+            if "W" in token_to_idx:
+                boosts[token_to_idx["W"]] += ALPHA_BOOST
+
+        # X: Index finger hooked/bent (partial extension)
+        if 0.07 < np.linalg.norm(index_tip - wrist) < 0.13 and not a_mid and not a_ring and not a_pinky:
+            if "X" in token_to_idx:
+                boosts[token_to_idx["X"]] += ALPHA_BOOST
+
+        # Y: Thumb + pinky extended (hang-loose/shaka)
+        if a_thumb and not a_index and not a_mid and not a_ring and a_pinky:
+            if "Y" in token_to_idx:
+                boosts[token_to_idx["Y"]] += ALPHA_BOOST
+
+        # Z: Index extended (like pointing), model handles Z-trace trajectory
+        if a_index and not a_mid and not a_ring and not a_pinky and not thumb_side_x > 0.08:
+            if "Z" in token_to_idx:
+                boosts[token_to_idx["Z"]] += ALPHA_BOOST * 0.8  # slight de-priority vs D/L
 
         return boosts
 
@@ -253,7 +396,7 @@ class SpatioTemporalSequenceModel(nn.Module):
         }, filepath)
 
     @classmethod
-    def load(cls, filepath=None, in_features=1629, num_classes=28, device=None):
+    def load(cls, filepath=None, in_features=1629, num_classes=32, device=None):
         """Loads model from checkpoint onto specified device or CPU fallback."""
         if device == 'auto':
             device = "cuda" if torch.cuda.is_available() else "cpu"
