@@ -97,7 +97,7 @@ class InteractiveVocabTester:
         self.advance_delay_frames = 0
         self.success_flash_frames = 0
         self.hold_streak = 0
-        self.REQUIRED_HOLD_FRAMES = 6  # Requires holding gesture steadily for 6 consecutive frames (~200ms)
+        self.REQUIRED_HOLD_FRAMES = 4  # Requires holding gesture steadily for 4 consecutive frames (~133ms)
 
         # Detailed results tracking
         self.results = {
@@ -205,6 +205,7 @@ class InteractiveVocabTester:
     def handle_click(self, x, y):
         """Processes mouse click on interactive HUD buttons."""
         for btn in self.buttons:
+            # pyrefly: ignore [bad-unpacking]
             x1, y1, x2, y2 = btn["rect"]
             if x1 <= x <= x2 and y1 <= y <= y2:
                 action = btn["action"]
@@ -401,6 +402,7 @@ class InteractiveVocabTester:
 
         # 5. Interactive Clickable Buttons
         for btn in self.buttons:
+            # pyrefly: ignore [bad-unpacking]
             x1, y1, x2, y2 = btn["rect"]
             label = btn["label"]
             if btn["action"] == "mute":
