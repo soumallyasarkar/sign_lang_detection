@@ -7,6 +7,7 @@ with synchronized outputs for graphical HUD and auditory speech channels.
 import collections
 import json
 import os
+import cv2
 import numpy as np
 import torch
 
@@ -42,7 +43,8 @@ class ContinuousInterpretationPipeline:
         self.vocab = self._load_vocab()
 
         # Initialize 8 core backend modules
-        self.capture = VideoStreamIngestor(src=self.camera_idx, target_fps=self.target_fps)
+        self.mirror_camera = sys_cfg.get('mirror_camera', True)
+        self.capture = VideoStreamIngestor(src=self.camera_idx, target_fps=self.target_fps, mirror=self.mirror_camera)
         self.normalizer = FrameNormalizer(target_size=tuple(sys_cfg.get('input_resolution', [224, 224])))
         self.extractor = HolisticLandmarkExtractor()
 
@@ -113,10 +115,14 @@ class ContinuousInterpretationPipeline:
             sentence: Grammatically translated English sentence (or latest)
         """
         # Module 2: Preprocessing
-        norm_img, frame_rgb = self.normalizer(frame_bgr)
+        norm_img, _ = self.normalizer(frame_bgr)
 
         # Module 3: Holistic Feature Extraction
-        vec_1629d, annotated_frame = self.extractor.extract(frame_rgb, frame_bgr)
+        # Feed high-resolution RGB to MediaPipe for sharp hand keypoint tracking without letterbox distortion
+        full_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        vec_1629d, annotated_frame = self.extractor.extract(
+            full_rgb, frame_bgr, is_mirrored=getattr(self.capture, 'mirror', True)
+        )
 
         # Temporal sequence window aggregation
         self.window_buffer.append(vec_1629d)

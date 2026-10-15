@@ -4,6 +4,7 @@
 system:
   target_fps: 30
   camera_idx: 0
+  mirror_camera: true
   input_resolution: [224, 224]
   device: "auto"            # "auto" uses NVIDIA RTX GPU if CUDA is available, else CPU
 

@@ -91,11 +91,13 @@ class InteractiveVocabTester:
         self.running = False
         self.audio_enabled = True
 
-        # Timing and Debounce
+        # Timing, Hold-Streak & Debounce
         self.cooldown_frames = 0
-        self.COOLDOWN_DELAY = 35   # ~1.2 seconds at 30 FPS between trials
+        self.COOLDOWN_DELAY = 45   # ~1.5 seconds at 30 FPS between trials
         self.advance_delay_frames = 0
         self.success_flash_frames = 0
+        self.hold_streak = 0
+        self.REQUIRED_HOLD_FRAMES = 6  # Requires holding gesture steadily for 6 consecutive frames (~200ms)
 
         # Detailed results tracking
         self.results = {
@@ -241,13 +243,21 @@ class InteractiveVocabTester:
                 self.advance_to_next_word()
             return annotated_frame, pred_sign, conf, False
 
-        # Match check: Emitted token OR high-confidence raw prediction matching target
+        # Match check: Require steady holding of target gesture or confirmed emitted token
         is_match = False
         if target and self.cooldown_frames == 0 and self.advance_delay_frames == 0:
             if emitted_sign == target and conf >= self.min_confidence:
                 is_match = True
-            elif pred_sign == target and conf >= (self.min_confidence + 0.10):
-                is_match = True
+                self.hold_streak = 0
+            elif pred_sign == target and conf >= self.min_confidence:
+                self.hold_streak += 1
+                if self.hold_streak >= self.REQUIRED_HOLD_FRAMES:
+                    is_match = True
+                    self.hold_streak = 0
+            else:
+                self.hold_streak = max(0, self.hold_streak - 1)
+        else:
+            self.hold_streak = 0
 
         trial_registered = False
         if is_match and self.current_trial < self.trials_per_word:
@@ -255,6 +265,7 @@ class InteractiveVocabTester:
             trial_registered = True
             self.success_flash_frames = 15
             self.cooldown_frames = self.COOLDOWN_DELAY
+            self.hold_streak = 0
             self.pipeline.glosser.reset()
 
             self.results[target]["confidences"].append(round(conf_pct, 1))
@@ -268,6 +279,7 @@ class InteractiveVocabTester:
                 self.advance_delay_frames = 40  # ~1.3 seconds celebration before next sign
 
         return annotated_frame, pred_sign, conf, trial_registered
+
 
     def render_hud(self, annotated_frame, pred_sign, conf):
         """Constructs an informative, beautiful visual HUD over the video feed."""

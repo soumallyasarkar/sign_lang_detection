@@ -389,8 +389,8 @@ class SignInterpreterGUI:
             self.root.after(33, self._schedule_next_frame)
 
     def run_opencv_window(self):
-        """Interactive desktop GUI using native OpenCV HighGUI rendering."""
-        window_name = "Real-Time ASL Interpretation System — Team 14"
+        """Interactive desktop GUI using native OpenCV HighGUI rendering with a clean, fixed-resolution 1100x720 HUD."""
+        window_name = "Real-Time ASL Interpretation System - Team 14"
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(window_name, 1100, 720)
         try:
@@ -405,9 +405,9 @@ class SignInterpreterGUI:
             ord('4'): ["NICE", "MEET", "ALL", "YOU"]
         }
 
-        print("\n" + "=" * 65)
-        print("  Real-Time Sign Language Interpretation GUI (OpenCV HUD)")
-        print("=" * 65)
+        print("\n" + "=" * 70)
+        print("  Real-Time Sign Language Interpretation GUI (High-Definition HUD)")
+        print("=" * 70)
         print("  Controls:")
         print("    [P]       : Toggle Pause / Resume feed")
         print("    [M]       : Toggle Neural Edge-TTS voice on/off")
@@ -415,7 +415,9 @@ class SignInterpreterGUI:
         print("    [S]       : Export transcript to markdown log file")
         print("    [1,2,3,4] : Trigger Benchmark Qualitative Demo Sequences")
         print("    [Q] / ESC : Exit application cleanly")
-        print("=" * 65 + "\n")
+        print("=" * 70 + "\n")
+
+        CANVAS_W, CANVAS_H = 1100, 720
 
         while self.running:
             if not self.is_paused:
@@ -431,49 +433,146 @@ class SignInterpreterGUI:
 
             self._last_frame = annotated_frame.copy()
 
-            # Create HUD Canvas: Video with Top and Bottom Banner Overlays
-            h, w = annotated_frame.shape[:2]
-            hud = np.zeros((h + 170, w, 3), dtype=np.uint8)
-            hud[:h, :w] = annotated_frame
+            # Create clean, fixed-resolution 1100x720 background
+            hud = np.zeros((CANVAS_H, CANVAS_W, 3), dtype=np.uint8)
+            hud[:, :735] = (16, 18, 24)       # Left area (dark navy)
+            hud[:, 735:] = (22, 26, 36)       # Right sidebar (charcoal slate)
+            cv2.line(hud, (735, 0), (735, CANVAS_H), (42, 50, 66), 2)
 
-            # Top Telemetry Header Bar
-            cv2.rectangle(hud, (0, 0), (w, 40), (24, 27, 34), -1)
-            cv2.putText(hud, "ASL Assistive Interpreter (Team 14)", (15, 26),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 229, 0), 2)
+            # -------------------------------------------------------------
+            # 1. Top Title & Status Header (Height: 46px)
+            # -------------------------------------------------------------
+            cv2.rectangle(hud, (0, 0), (CANVAS_W, 46), (24, 28, 38), -1)
+            cv2.line(hud, (0, 46), (CANVAS_W, 46), (42, 50, 66), 1)
+            cv2.putText(hud, "Real-Time ASL Assistive Interpreter - Team 14", (20, 31),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.62, (0, 229, 255), 2, cv2.LINE_AA)
 
             status_text = "PAUSED" if self.is_paused else "LIVE 30 FPS"
-            status_color = (0, 171, 255) if self.is_paused else (118, 230, 0)
-            cv2.putText(hud, f"[{status_text}]", (w - 140, 26),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, status_color, 2)
+            status_color = (0, 171, 255) if self.is_paused else (0, 230, 118)
+            cv2.putText(hud, f"[{status_text}]", (CANVAS_W - 160, 31),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.58, status_color, 2, cv2.LINE_AA)
 
-            # Bottom Subtitle Card HUD
-            cv2.rectangle(hud, (0, h), (w, h + 170), (18, 20, 24), -1)
-            cv2.rectangle(hud, (10, h + 8), (w - 10, h + 162), (32, 36, 46), -1)
+            # -------------------------------------------------------------
+            # 2. Left Video Viewport (Aspect-Ratio Preserved: 710x456 box)
+            # -------------------------------------------------------------
+            target_vw, target_vh = 705, 456
+            vid_h, vid_w = annotated_frame.shape[:2]
+            scale = min(target_vw / vid_w, target_vh / vid_h)
+            scaled_w, scaled_h = int(vid_w * scale), int(vid_h * scale)
+            scaled_frame = cv2.resize(annotated_frame, (scaled_w, scaled_h), interpolation=cv2.INTER_LINEAR)
 
-            # Subtitle Card Label
-            cv2.putText(hud, "DYNAMIC SUBTITLE HUD (TRANSLATED ENGLISH):", (25, h + 34),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 216, 128), 1)
+            vx = 15 + (target_vw - scaled_w) // 2
+            vy = 56 + (target_vh - scaled_h) // 2
+            hud[vy:vy + scaled_h, vx:vx + scaled_w] = scaled_frame
+            cv2.rectangle(hud, (15, 56), (15 + target_vw, 56 + target_vh), (45, 55, 75), 1)
+
+            # -------------------------------------------------------------
+            # 3. Dynamic Subtitle HUD Card (Below Video, y: 522 to 705)
+            # -------------------------------------------------------------
+            card_x1, card_y1, card_x2, card_y2 = 15, 522, 15 + target_vw, 705
+            cv2.rectangle(hud, (card_x1, card_y1), (card_x2, card_y2), (28, 34, 46), -1)
+            cv2.rectangle(hud, (card_x1, card_y1), (card_x2, card_y2), (0, 200, 255), 1)
+
+            cv2.putText(hud, "DYNAMIC SUBTITLE HUD (TRANSLATED ENGLISH):", (card_x1 + 15, card_y1 + 26),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 216, 128), 1, cv2.LINE_AA)
 
             display_sentence = sentence if sentence else "Awaiting ASL continuous gesture stream..."
-            cv2.putText(hud, f"\"{display_sentence}\"", (25, h + 70),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2)
+            # Word-wrap sentence if long
+            if len(display_sentence) > 48:
+                line1 = display_sentence[:48]
+                line2 = display_sentence[48:96]
+                cv2.putText(hud, f"\"{line1}", (card_x1 + 15, card_y1 + 60),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.68, (255, 255, 255), 2, cv2.LINE_AA)
+                cv2.putText(hud, f"{line2}\"", (card_x1 + 15, card_y1 + 92),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.68, (255, 255, 255), 2, cv2.LINE_AA)
+            else:
+                cv2.putText(hud, f"\"{display_sentence}\"", (card_x1 + 15, card_y1 + 68),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.72, (255, 255, 255), 2, cv2.LINE_AA)
 
-            # Telemetry metrics row
+            # Recognized Gloss Tokens Sub-row
+            tokens = self.pipeline.glosser.get_tokens()
+            tokens_str = "  ".join([f"[{t}]" for t in tokens[-6:]]) if tokens else "[No active tokens]"
+            cv2.putText(hud, f"Recognized Glosses: {tokens_str}", (card_x1 + 15, card_y2 - 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 229, 255), 1, cv2.LINE_AA)
+
+            # -------------------------------------------------------------
+            # 4. Right Sidebar: Telemetry, Meters & Controls (x: 745 to 1085)
+            # -------------------------------------------------------------
+            side_x = 750
+
+            # Telemetry Header
+            cv2.putText(hud, "REAL-TIME TELEMETRY", (side_x, 75),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.58, (180, 215, 255), 2, cv2.LINE_AA)
+
+            # Confidence Meter
             conf_pct = conf * 100.0
             tag = "HIGH" if conf_pct >= 85 else ("MED" if conf_pct >= 60 else "LOW")
-            tts_status = "ON" if self.audio_enabled else "MUTED"
-            tokens_str = " ".join(self.pipeline.glosser.get_tokens()[-4:]) or "None"
+            conf_color = (0, 230, 118) if conf_pct >= 85 else ((0, 229, 255) if conf_pct >= 60 else (0, 150, 255))
+
+            cv2.putText(hud, f"Confidence: {conf_pct:.1f}% [{tag}]", (side_x, 110),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.52, conf_color, 1, cv2.LINE_AA)
+
+            # Progress Bar for Confidence
+            bar_w = 325
+            cv2.rectangle(hud, (side_x, 122), (side_x + bar_w, 134), (35, 42, 55), -1)
+            fill_w = int(bar_w * (conf_pct / 100.0))
+            if fill_w > 0:
+                cv2.rectangle(hud, (side_x, 122), (side_x + fill_w, 134), conf_color, -1)
+
+            # Active Sign Card
+            cv2.rectangle(hud, (side_x, 150), (side_x + bar_w, 205), (28, 34, 46), -1)
+            cv2.rectangle(hud, (side_x, 150), (side_x + bar_w, 205), (45, 55, 75), 1)
+
             pred_now = getattr(self.pipeline, 'latest_predicted_token', '')
             sign_disp = (pred_now if conf_pct >= 40 else "—") if pred_now else (self.pipeline.latest_sign or "—")
+            cv2.putText(hud, "CURRENT SIGN DETECTED:", (side_x + 12, 172),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.44, (180, 200, 220), 1, cv2.LINE_AA)
+            cv2.putText(hud, f"[ {sign_disp} ]", (side_x + 12, 197),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 229, 255), 2, cv2.LINE_AA)
 
-            metrics_line = f"Sign: {sign_disp} ({conf_pct:.1f}% [{tag}])   |   Tokens: [{tokens_str}]   |   Voice TTS: {tts_status}"
-            cv2.putText(hud, metrics_line, (25, h + 105),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.52, (180, 200, 220), 1)
+            # Audio Status
+            tts_status = "ACTIVE (UNMUTED)" if self.audio_enabled else "MUTED"
+            tts_color = (0, 230, 118) if self.audio_enabled else (0, 100, 255)
+            cv2.putText(hud, f"Voice Audio TTS:  {tts_status}", (side_x, 230),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.46, tts_color, 1, cv2.LINE_AA)
 
-            # Controls help bar
-            help_line = "[P] Pause  |  [M] Mute  |  [C] Clear  |  [S] Save Log  |  [1-4] Demo Sentences  |  [Q] Exit"
-            cv2.putText(hud, help_line, (25, h + 140),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 200, 255), 1)
+            # Gloss Token Timeline Section
+            cv2.line(hud, (side_x, 248), (side_x + bar_w, 248), (42, 50, 66), 1)
+            cv2.putText(hud, "RECENT DETECTED GLOSSES:", (side_x, 275),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.52, (180, 215, 255), 2, cv2.LINE_AA)
+
+            # Timeline box (Display up to 6 items)
+            recent_tokens = tokens[-6:] if tokens else []
+            tl_y = 305
+            if not recent_tokens:
+                cv2.putText(hud, "  (No signs recognized yet)", (side_x + 5, tl_y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.44, (120, 130, 145), 1, cv2.LINE_AA)
+            else:
+                for idx, t_sign in enumerate(reversed(recent_tokens)):
+                    dot_color = (0, 230, 118) if idx == 0 else (0, 229, 255)
+                    cv2.putText(hud, f"● {t_sign}", (side_x + 10, tl_y + (idx * 26)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.48, dot_color, 1, cv2.LINE_AA)
+
+            # Interactive Controls Guide Card
+            cv2.line(hud, (side_x, 500), (side_x + bar_w, 500), (42, 50, 66), 1)
+            cv2.putText(hud, "SESSION CONTROLS:", (side_x, 525),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.52, (180, 215, 255), 2, cv2.LINE_AA)
+
+            controls = [
+                ("[P]", "Pause / Resume Video Stream"),
+                ("[F]", "Toggle Mirror / Flip Mode"),
+                ("[M]", "Mute / Unmute Voice TTS"),
+                ("[C]", "Clear Subtitles & History"),
+                ("[S]", "Export Transcript to Markdown"),
+                ("[1-4]", "Trigger Demo Dialogue Sentences"),
+                ("[Q]", "Exit Application Cleanly"),
+            ]
+            for c_idx, (key_label, desc) in enumerate(controls):
+                cy = 546 + (c_idx * 22)
+                cv2.putText(hud, key_label, (side_x + 5, cy),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 229, 255), 1, cv2.LINE_AA)
+                cv2.putText(hud, f"- {desc}", (side_x + 50, cy),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.40, (180, 190, 205), 1, cv2.LINE_AA)
 
             cv2.imshow(window_name, hud)
             key = cv2.waitKey(25) & 0xFF
@@ -482,6 +581,11 @@ class SignInterpreterGUI:
                 break
             elif key == ord('p'):
                 self.toggle_pause()
+            elif key == ord('f'):
+                if hasattr(self.pipeline, 'capture') and hasattr(self.pipeline.capture, 'mirror'):
+                    self.pipeline.capture.mirror = not self.pipeline.capture.mirror
+                    state_str = "ON" if self.pipeline.capture.mirror else "OFF"
+                    print(f"[VIDEO] Camera Mirroring (Flip): {state_str}")
             elif key == ord('m'):
                 self.toggle_audio()
             elif key == ord('c'):
@@ -491,20 +595,20 @@ class SignInterpreterGUI:
                 saved = self.export_transcript("transcript_session_log.md")
                 print(f"Transcript exported to {saved}")
             elif key in demo_sequences:
-                # Inject demonstration sequence
-                tokens = demo_sequences[key]
-                print(f"\n[DEMO INJECTION] Executing Sequence: {tokens}")
+                tokens_seq = demo_sequences[key]
+                print(f"\n[DEMO INJECTION] Executing Sequence: {tokens_seq}")
                 self.pipeline.glosser.reset()
-                for t in tokens:
+                for t in tokens_seq:
                     self.pipeline.glosser.emitted_tokens.append(t)
-                trans = self.pipeline.translator.translate_accumulated(tokens)
+                trans = self.pipeline.translator.translate_accumulated(tokens_seq)
                 self.pipeline.latest_sentence = trans
-                self.pipeline.latest_sign = tokens[-1]
+                self.pipeline.latest_sign = tokens_seq[-1]
                 self.pipeline.latest_confidence = 0.965
                 self.pipeline.tts.speak_async(trans)
 
         cv2.destroyAllWindows()
         self.close()
+
 
     def close(self):
         """Gracefully shuts down pipeline and releases system resources."""

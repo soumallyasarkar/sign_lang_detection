@@ -14,11 +14,12 @@ import numpy as np
 class VideoStreamIngestor:
     """Multi-threaded OpenCV video stream ingestor with 30 FPS resampling."""
 
-    def __init__(self, src=0, target_fps=30.0, max_reconnect_attempts=3):
+    def __init__(self, src=0, target_fps=30.0, max_reconnect_attempts=3, mirror=True):
         self.src = src
         self.target_fps = float(target_fps)
         self.frame_interval = 1.0 / self.target_fps
         self.max_reconnect_attempts = max_reconnect_attempts
+        self.mirror = bool(mirror)
 
         self.cap = None
         self.lock = threading.Lock()
@@ -91,6 +92,8 @@ class VideoStreamIngestor:
                         ret, frame = self.cap.read()
                         if ret and frame is not None:
                             break
+                if ret and frame is not None and self.mirror:
+                    frame = cv2.flip(frame, 1)
 
             if not ret or frame is None:
                 frame = self._generate_synthetic_frame()

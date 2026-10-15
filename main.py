@@ -92,7 +92,7 @@ def run_gui(config):
             print(f"Tkinter unavailable ({e}), launching native OpenCV HUD...")
 
     print("\nLaunching Live Sign Language Interpretation Desktop GUI...")
-    print("Window Title: 'Real-Time ASL Interpretation System — Team 14'")
+    print("Window Title: 'Real-Time ASL Interpretation System - Team 14'")
     print("Note: If the window appears behind your code editor, check your taskbar or press Alt+Tab to view it.\n")
 
     # Seamless native OpenCV HighGUI HUD
